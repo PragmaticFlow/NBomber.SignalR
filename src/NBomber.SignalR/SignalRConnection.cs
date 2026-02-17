@@ -1,19 +1,35 @@
-﻿using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
+﻿using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.SignalR.Protocol;
 using NBomber.Contracts;
 using NBomber.CSharp;
-using System.Text.Json;
 using System.Threading.Channels;
 
 namespace NBomber.SignalR;
 
 /// <summary>
+/// Specifies the protocol used for SignalR hub communication.
+/// </summary>
+public enum HubProtocolFormat
+{
+    /// <summary>
+    /// Uses JSON serialization for hub messages.
+    /// </summary>
+    Json,
+
+    /// <summary>
+    /// Uses MessagePack binary serialization for hub messages.
+    /// </summary>
+    MessagePack
+}
+
+/// <summary>
 /// Provides a wrapper around an <see cref="HubConnection"/> for managing SignalR communication,
 /// including connecting, invoking methods on the server, and calculating message sizes for performance testing.
 /// </summary>
-public class SignalRConnection
+public class SignalRConnection : IDisposable
 {
     private readonly Channel<Response<object>> _channel = Channel.CreateUnbounded<Response<object>>();
+    private readonly IHubProtocol _hubProtocol;
 
     /// <summary>
     /// Gets the underlying <see cref="HubConnection"/> used for communication with the SignalR Hub.
@@ -21,22 +37,43 @@ public class SignalRConnection
     public HubConnection Connection { get; }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SignalRConnection"/> class.
+    /// Initializes a new instance of the <see cref="SignalRConnection"/> class
+    /// using <see cref="HubProtocolFormat.Json"/> as the default hub protocol.
     /// </summary>
-    /// <param name="connection">The SignalR hub connection to wrap.</param>
-    public SignalRConnection(HubConnection connection)
+    /// <param name="connection">The <see cref="HubConnection"/> to wrap.</param>
+    /// <param name="hubProtocolType">The <see cref="HubProtocolFormat"/> to use for serializing hub messages.</param>
+    public SignalRConnection(HubConnection connection, HubProtocolFormat hubProtocolType = HubProtocolFormat.Json)
     {
         Connection = connection;
+
+        _hubProtocol = hubProtocolType switch
+        {
+            HubProtocolFormat.Json => new JsonHubProtocol(),
+            HubProtocolFormat.MessagePack => new MessagePackHubProtocol(),
+            _ => throw new ArgumentException("Unsupported protocol type")
+        };
     }
 
     /// <summary>
-    /// Reads a response from the internal channel asynchronously.
-    /// This is typically used to receive server-to-client messages.
+    /// Asynchronously receives a PUSH message from SignalR server.
     /// </summary>
-    /// <returns>A task that represents the asynchronous read operation. The task result contains the response.</returns>
-    public async Task<Response<object>> Receive()
+    /// <param name="token">Token used to cancel the operation.</param>
+    /// <returns>
+    /// A <see cref="Response{T}"/> containing the received <see cref="object"/>.
+    /// </returns>
+    /// <exception cref="IgnoreMeasurementException">
+    /// Thrown when the operation is cancelled by the token.
+    /// </exception>
+    public async ValueTask<Response<object>> Receive(CancellationToken token)
     {
-        return await _channel.Reader.ReadAsync();
+        try
+        {
+            return await _channel.Reader.ReadAsync(token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new IgnoreMeasurementException();
+        }
     }
 
     /// <summary>
@@ -54,7 +91,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName);
 
@@ -79,7 +116,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1);
 
@@ -104,7 +141,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, object? arg2, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2);
 
@@ -129,7 +166,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, object? arg2, object? arg3, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3);
 
@@ -154,7 +191,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4);
 
@@ -179,7 +216,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5);
 
@@ -204,7 +241,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6);
 
@@ -229,7 +266,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 
@@ -254,7 +291,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 
@@ -279,7 +316,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 
@@ -304,7 +341,7 @@ public class SignalRConnection
     /// </summary>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> InvokeAsync(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, object? arg10, CancellationToken cancellationToken = default)
+    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, object? arg10, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
 
@@ -330,7 +367,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName);
 
@@ -356,7 +393,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1);
 
@@ -382,7 +419,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, object? arg2, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2);
 
@@ -408,7 +445,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, object? arg2, object? arg3, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3);
 
@@ -434,7 +471,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4);
 
@@ -460,7 +497,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5);
 
@@ -486,7 +523,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6);
 
@@ -512,7 +549,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 
@@ -538,7 +575,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
 
@@ -564,7 +601,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
 
@@ -590,7 +627,7 @@ public class SignalRConnection
     /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
     /// <param name="methodName">The name of the server method to invoke.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> InvokeAsync<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, object? arg10, CancellationToken cancellationToken = default)
+    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, object? arg10, CancellationToken cancellationToken = default)
     {
         var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
 
@@ -612,39 +649,64 @@ public class SignalRConnection
 
     private int CalculateRequestSize(string methodName, params object?[] args)
     {
-        var requestBaseLength = 57; // {"type":1,"invocationId":"123","target":"","arguments":}
-
-        int size = requestBaseLength + methodName.Length;
-
-        string argsJson = JsonSerializer.Serialize(args);
-        size += System.Text.Encoding.UTF8.GetByteCount(argsJson);
-
-        return size;
+        var message = new InvocationMessage("???", methodName, args);
+        var bytes = _hubProtocol.GetMessageBytes(message);
+        return bytes.Length;
     }
 
     private int CalculateResponseSize(object? payload = null, bool isError = false)
     {
-        var responseBaseLength = 33; // {"type":3,"invocationId":"123",}
-        var resultLength = 9;  // "result":
-        var errorLength = 8;   // "error":
+        HubMessage message = isError
+            ? CompletionMessage.WithError("???", payload?.ToString() ?? "")
+            : CompletionMessage.WithResult("???", payload);
 
-        int size = responseBaseLength + (isError ? errorLength : resultLength);
-
-        string payloadJson = JsonSerializer.Serialize(payload);
-        size += System.Text.Encoding.UTF8.GetByteCount(payloadJson);
-
-        return size;
+        var bytes = _hubProtocol.GetMessageBytes(message);
+        return bytes.Length;
     }
 
-    public static int CalculateServerInvocationSize(string methodName, params object?[] args)
+    /// <summary>
+    /// Calculates the size in bytes of a SignalR message for the specified method and arguments.
+    /// This is useful for tracking message sizes in performance testing scenarios.
+    /// </summary>
+    /// <param name="methodName">The name of the hub method.</param>
+    /// <param name="args">The arguments passed to the hub method.</param>
+    /// <returns>The size of the serialized message in bytes.</returns>
+    public int CalculateMessageSize(string methodName, params object?[] args)
     {
-        var baseLength = 34; // {"type":1,"target":"","arguments":}
+        var message = new InvocationMessage(methodName, args);
+        var bytes = _hubProtocol.GetMessageBytes(message);
+        return bytes.Length;
+    }
 
-        int size = baseLength + methodName.Length;
+    /// <summary>
+    /// Asynchronously starts the SignalR connection to the hub.
+    /// </summary>
+    /// <returns>
+    /// A <see cref="Response{T}"/> indicating successful connection.
+    /// </returns>
+    public async Task<Response<object>> Start()
+    {
+        await Connection.StartAsync();
+        return Response.Ok();
+    }
 
-        string argsJson = JsonSerializer.Serialize(args);
-        size += System.Text.Encoding.UTF8.GetByteCount(argsJson);
+    /// <summary>
+    /// Asynchronously stops the SignalR connection to the hub.
+    /// </summary>
+    /// <returns>
+    /// A <see cref="Response{T}"/> indicating successful disconnection.
+    /// </returns>
+    public async Task<Response<object>> Stop()
+    {
+        await Connection.StopAsync();
+        return Response.Ok();
+    }
 
-        return size;
+    /// <summary>
+    /// Releases resources used by the SignalR connection, including disposing of the connection instance.
+    /// </summary>
+    public async void Dispose()
+    {
+        await Connection.DisposeAsync();
     }
 }

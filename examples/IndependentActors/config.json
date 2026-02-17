@@ -1,0 +1,33 @@
+﻿{
+  "TestSuite": "SignalR",
+  "TestName": "independent_actors",
+
+  "TargetScenarios": [ "publish_scenario", "consume_scenario" ],
+
+  "GlobalSettings": {
+    "ScenariosSettings": [
+      {
+        "ScenarioName": "publish_scenario",
+
+        "WarmUpDuration": "00:00:03",
+
+        "LoadSimulationsSettings": [
+          { "Inject": [ 10, "00:00:01", "00:00:30" ] }
+        ]
+      },
+      {
+        "ScenarioName": "consume_scenario",
+
+        "WarmUpDuration": "00:00:03",
+
+        "LoadSimulationsSettings": [
+          { "KeepConstant": [ 1, "00:00:30" ] }
+        ]
+      }
+    ],
+
+    "GlobalCustomSettings": {
+      "SignalRServerUrl": "http://localhost:5077/chathub"
+    }
+  }
+}

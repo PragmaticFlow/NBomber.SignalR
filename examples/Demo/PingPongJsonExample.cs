@@ -1,15 +1,15 @@
 ﻿using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using NBomber.CSharp;
+using NBomber.SignalR;
 
-namespace NBomber.SignalR.Tests;
+new PingPongExample().Run();
 
 public record ChatMessage(string User, string Message);
 
-public class SignalRTests
+public class PingPongExample
 {
-    [Fact]
-    public void EndToEnd()
+    public void Run()
     {
         var scenario = Scenario.Create("signalr_scenario", async ctx =>
         {
@@ -20,6 +20,7 @@ public class SignalRTests
 
             var signalRConnection = new SignalRConnection(connection, HubProtocolFormat.Json); // Ensure the client uses the same protocol as the server
 
+            // Register handler on Connection object explicitly to receive server-to-client messages
             signalRConnection.Connection.On<string, string>("ReceiveMessage", (user, message) =>
             {
                 var responseSize = signalRConnection.CalculateMessageSize("ReceiveMessage", user, message);
@@ -27,35 +28,27 @@ public class SignalRTests
                 signalRConnection.Write(response);
             });
 
-            var connect = await Step.Run("connect", ctx, async () => await signalRConnection.Start());
+            var connect = await Step.Run("start", ctx, async () => await signalRConnection.Start());
 
             var send = await Step.Run("send_message", ctx, async () =>
             {
-                // Invoke directly on signalRConnection, so that NBomber can track the execution time and handle any exceptions
                 var response = await signalRConnection.Invoke<string>("SendMessage", "test_username", "test_message");
                 return response;
             });
 
             var receive = await Step.Run("receive_message", ctx, async () => await signalRConnection.Receive(ctx.ScenarioCancellationToken));
 
-            var disconnect = await Step.Run("disconnect", ctx, async () => await signalRConnection.Stop());
+            var disconnect = await Step.Run("stop", ctx, async () => await signalRConnection.Stop());
 
             return Response.Ok();
         })
-        .WithWarmUpDuration(TimeSpan.FromSeconds(5))
-        .WithLoadSimulations(Simulation.KeepConstant(10, TimeSpan.FromSeconds(5)));
+        .WithoutWarmUp()
+        .WithLoadSimulations(
+            Simulation.KeepConstant(1, TimeSpan.FromSeconds(30))
+        );
 
-        var stats = NBomberRunner
+        NBomberRunner
             .RegisterScenarios(scenario)
             .Run();
-
-        Assert.True(stats.AllOkCount > 0);
-        Assert.True(stats.AllFailCount == 0);
-
-        foreach (var scenarioStats in stats.ScenarioStats)
-        {
-            foreach (var stepStats in scenarioStats.StepStats)
-                Assert.True(stepStats.Ok.Latency.MaxMs > 0);
-        }
     }
 }

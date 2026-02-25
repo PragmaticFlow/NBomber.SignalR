@@ -21,6 +21,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "solution items", "solution 
 		Dockerfile = Dockerfile
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IndependentActors", "examples\IndependentActors\IndependentActors.csproj", "{9EF92092-E8F8-4355-AC86-5479094D3385}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,10 @@ Global
 		{D4114BEA-73DC-4941-9197-E65D5B79BBD3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D4114BEA-73DC-4941-9197-E65D5B79BBD3}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D4114BEA-73DC-4941-9197-E65D5B79BBD3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9EF92092-E8F8-4355-AC86-5479094D3385}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9EF92092-E8F8-4355-AC86-5479094D3385}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9EF92092-E8F8-4355-AC86-5479094D3385}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9EF92092-E8F8-4355-AC86-5479094D3385}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -51,6 +57,7 @@ Global
 		{6CE59B02-5CFF-4DA4-8A13-0DCF4BFA3235} = {C10063F5-3903-43F4-9CCE-6283678C791B}
 		{648DFFCF-04ED-42E3-AF84-745FFEEDE240} = {C10063F5-3903-43F4-9CCE-6283678C791B}
 		{D4114BEA-73DC-4941-9197-E65D5B79BBD3} = {FC77748D-8BF0-4F94-AB10-544A5047707A}
+		{9EF92092-E8F8-4355-AC86-5479094D3385} = {C10063F5-3903-43F4-9CCE-6283678C791B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {524AB54A-CBD0-4117-BAEC-825731ED222A}

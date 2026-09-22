@@ -26,7 +26,7 @@ public enum HubProtocolFormat
 /// Provides a wrapper around an <see cref="HubConnection"/> for managing SignalR communication,
 /// including connecting, invoking methods on the server, and calculating message sizes for performance testing.
 /// </summary>
-public class SignalRConnection : IDisposable
+public class SignalRConnection : IAsyncDisposable
 {
     private readonly Channel<Response<object>> _channel = Channel.CreateUnbounded<Response<object>>();
     private readonly IHubProtocol _hubProtocol;
@@ -62,7 +62,7 @@ public class SignalRConnection : IDisposable
     /// A <see cref="Response{T}"/> containing the received <see cref="object"/>.
     /// </returns>
     /// <exception cref="IgnoreMeasurementException">
-    /// Thrown when the operation is cancelled by the token.
+    /// Thrown when the operation is cancelled by the token, or when the connection is disposed while waiting.
     /// </exception>
     public async ValueTask<Response<object>> Receive(CancellationToken token)
     {
@@ -71,6 +71,10 @@ public class SignalRConnection : IDisposable
             return await _channel.Reader.ReadAsync(token);
         }
         catch (OperationCanceledException)
+        {
+            throw new IgnoreMeasurementException();
+        }
+        catch (ChannelClosedException)
         {
             throw new IgnoreMeasurementException();
         }
@@ -703,10 +707,12 @@ public class SignalRConnection : IDisposable
     }
 
     /// <summary>
-    /// Releases resources used by the SignalR connection, including disposing of the connection instance.
+    /// Asynchronously releases resources used by the SignalR connection, including disposing of the connection instance.
+    /// Any pending <see cref="Receive"/> call is terminated with <see cref="IgnoreMeasurementException"/>.
     /// </summary>
-    public async void Dispose()
+    public async ValueTask DisposeAsync()
     {
+        _channel.Writer.TryComplete();
         await Connection.DisposeAsync();
-    }
+    }    
 }

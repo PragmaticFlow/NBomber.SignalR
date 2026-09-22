@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using NBomber.Contracts;
 using NBomber.CSharp;
@@ -7,26 +7,10 @@ using System.Threading.Channels;
 namespace NBomber.SignalR;
 
 /// <summary>
-/// Specifies the protocol used for SignalR hub communication.
-/// </summary>
-public enum HubProtocolFormat
-{
-    /// <summary>
-    /// Uses JSON serialization for hub messages.
-    /// </summary>
-    Json,
-
-    /// <summary>
-    /// Uses MessagePack binary serialization for hub messages.
-    /// </summary>
-    MessagePack
-}
-
-/// <summary>
 /// Provides a wrapper around an <see cref="HubConnection"/> for managing SignalR communication,
 /// including connecting, invoking methods on the server, and calculating message sizes for performance testing.
 /// </summary>
-public class SignalRConnection : IAsyncDisposable
+public partial class SignalRConnection : IAsyncDisposable
 {
     private readonly Channel<Response<object>> _channel = Channel.CreateUnbounded<Response<object>>();
     private readonly IHubProtocol _hubProtocol;
@@ -52,6 +36,21 @@ public class SignalRConnection : IAsyncDisposable
             HubProtocolFormat.MessagePack => new MessagePackHubProtocol(),
             _ => throw new ArgumentException("Unsupported protocol type")
         };
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SignalRConnection"/> class using a custom <see cref="IHubProtocol"/>.
+    /// Use this overload when the connection is configured with a protocol that <see cref="HubProtocolFormat"/> does not cover.
+    /// </summary>
+    /// <param name="connection">The <see cref="HubConnection"/> to wrap.</param>
+    /// <param name="hubProtocol">
+    /// The protocol used to serialize hub messages when calculating message sizes.
+    /// It should match the protocol the <paramref name="connection"/> was built with, otherwise the reported sizes will be inaccurate.
+    /// </param>
+    public SignalRConnection(HubConnection connection, IHubProtocol hubProtocol)
+    {
+        Connection = connection;
+        _hubProtocol = hubProtocol;
     }
 
     /// <summary>
@@ -90,18 +89,13 @@ public class SignalRConnection : IAsyncDisposable
         _channel.Writer.TryWrite(response);
     }
 
-    /// <summary>
-    /// Invokes a hub method on the server with no parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, CancellationToken cancellationToken = default)
+    private async Task<Response<object>> InvokeCore(string methodName, object?[] args, CancellationToken cancellationToken)
     {
-        var requestSize = CalculateRequestSize(methodName);
+        var requestSize = CalculateRequestSize(methodName, args);
 
         try
         {
-            await Connection.InvokeAsync(methodName, cancellationToken);
+            await Connection.InvokeCoreAsync(methodName, args, cancellationToken);
 
             var responseSize = CalculateResponseSize();
 
@@ -115,529 +109,13 @@ public class SignalRConnection : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Invokes a hub method on the server with 1 parameter.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, CancellationToken cancellationToken = default)
+    private async Task<Response<TResult>> InvokeCore<TResult>(string methodName, object?[] args, CancellationToken cancellationToken)
     {
-        var requestSize = CalculateRequestSize(methodName, arg1);
+        var requestSize = CalculateRequestSize(methodName, args);
 
         try
         {
-            await Connection.InvokeAsync(methodName, arg1, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 2 parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2);
-
-        try
-        {
-            await Connection.InvokeAsync(methodName, arg1, arg2, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 3 parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3);
-
-        try
-        {
-            await Connection.InvokeAsync(methodName, arg1, arg2, arg3, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 4 parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4);
-
-        try
-        {
-            await Connection.InvokeAsync(methodName, arg1, arg2, arg3, arg4, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 5 parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5);
-
-        try
-        {
-            await Connection.InvokeAsync(methodName, arg1, arg2, arg3, arg4, arg5, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 6 parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6);
-
-        try
-        {
-            await Connection.InvokeAsync(methodName, arg1, arg2, arg3, arg4, arg5, arg6, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 7 parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
-
-        try
-        {
-            await Connection.InvokeAsync(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 8 parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
-
-        try
-        {
-            await Connection.InvokeAsync(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 9 parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
-
-        try
-        {
-            await Connection.InvokeAsync(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 10 parameters.
-    /// </summary>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<object>> Invoke(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, object? arg10, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
-
-        try
-        {
-            await Connection.InvokeAsync(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, cancellationToken);
-
-            var responseSize = CalculateResponseSize();
-
-            return Response.Ok(sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with no parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 1 parameter and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 2 parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, arg2, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 3 parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, arg2, arg3, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 4 parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, arg2, arg3, arg4, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 5 parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, arg2, arg3, arg4, arg5, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 6 parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, arg2, arg3, arg4, arg5, arg6, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 7 parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 8 parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 9 parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, cancellationToken);
-
-            var responseSize = CalculateResponseSize(result);
-
-            return Response.Ok(payload: result, sizeBytes: requestSize + responseSize);
-        }
-        catch (Exception ex)
-        {
-            var responseSize = CalculateResponseSize(ex.Message, isError: true);
-
-            return Response.Fail<TResult>(sizeBytes: requestSize + responseSize, message: ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Invokes a hub method on the server with 10 parameters and returns a result.
-    /// </summary>
-    /// <typeparam name="TResult">The type of the result returned by the server method.</typeparam>
-    /// <param name="methodName">The name of the server method to invoke.</param>
-    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
-    public async Task<Response<TResult>> Invoke<TResult>(string methodName, object? arg1, object? arg2, object? arg3, object? arg4, object? arg5, object? arg6, object? arg7, object? arg8, object? arg9, object? arg10, CancellationToken cancellationToken = default)
-    {
-        var requestSize = CalculateRequestSize(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
-
-        try
-        {
-            var result = await Connection.InvokeAsync<TResult>(methodName, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, cancellationToken);
+            var result = await Connection.InvokeCoreAsync<TResult>(methodName, args, cancellationToken);
 
             var responseSize = CalculateResponseSize(result);
 
@@ -714,5 +192,5 @@ public class SignalRConnection : IAsyncDisposable
     {
         _channel.Writer.TryComplete();
         await Connection.DisposeAsync();
-    }    
+    }
 }
